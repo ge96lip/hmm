@@ -1,40 +1,36 @@
 import sys
-import numpy as np
 
-def forward(prev_alpha, emission_sequence, A, B): 
-    if not emission_sequence:
-        final_sum = sum(prev_alpha)
-        print(round(final_sum, 6))
-        return final_sum
-    
-    next_alpha = np.dot(prev_alpha, A)  # Matrix-vector multiplication: prev_alpha * A
-    next_alpha *= B[:, emission_sequence[0]]  # Element-wise multiplication with the emission probabilities
+def forward_pass(A, B, pi, obs):
+    T = len(obs)
+    N = len(A)
 
-    # Recursively call the function with the updated alpha vector and the remaining emission sequence
-    return forward(next_alpha, emission_sequence[1:], A, B)
+    alpha = [[0] * N for _ in range(T)]
+    for i in range(N):
+        alpha[0][i] = pi[i] * B[i][obs[0]]
 
-def execute_hmm():
-    # Read and parse input data
-    transition_data = sys.stdin.readline().split()
-    emission_data = sys.stdin.readline().split()
-    initial_data = sys.stdin.readline().split()
-    seq_emission = [int(x) for x in sys.stdin.readline().split()[1:]]
-    
-    # Convert the input data into matrices
-    transition_matrix = convert_to_matrix(transition_data[2:], int(transition_data[0]), int(transition_data[1]))
-    emission_matrix = convert_to_matrix(emission_data[2:], int(emission_data[0]), int(emission_data[1]))
-    initial_distribution = convert_to_matrix(initial_data[2:], int(initial_data[0]), int(initial_data[1]))
-    
-    emission_matrix = np.array(emission_matrix)
-    #print(emission_data)
-    initial_alpha = (initial_distribution[0] * emission_matrix[:, seq_emission[0]]).tolist()
-    
-    forward(initial_alpha, seq_emission[1:], transition_matrix, emission_matrix)
-    
+    for t in range(1, T):
+        for j in range(N):
+            alpha[t][j] = sum(alpha[t - 1][i] * A[i][j] for i in range(N)) * B[j][obs[t]]
+
+    return sum(alpha[T-1])
+
 def convert_to_matrix(data, num_rows, num_cols):
-
     data = list(map(float, data))
     return [data[i * num_cols:(i + 1) * num_cols] for i in range(num_rows)]
-    
-if __name__ == "__main__":
-    execute_hmm()
+
+
+# Read input
+A_data = sys.stdin.readline().split()
+B_data = sys.stdin.readline().split()
+pi_data = sys.stdin.readline().split()
+obs_data = sys.stdin.readline().split()
+
+# Convert into matrices
+A = convert_to_matrix(A_data[2:], int(A_data[0]), int(A_data[1]))
+B = convert_to_matrix(B_data[2:], int(B_data[0]), int(B_data[1]))
+pi = list(map(float, pi_data[2:]))
+obs = list(map(int, obs_data[1:]))
+
+# Calculate probability of observation sequence
+prob = forward_pass(A, B, pi, obs)
+print(round(prob, 6))
