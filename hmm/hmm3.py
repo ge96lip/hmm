@@ -1,4 +1,5 @@
 import sys
+import math
 
 
 def forward_pass(A, B, pi, obs):
@@ -6,46 +7,52 @@ def forward_pass(A, B, pi, obs):
     N = len(A)
 
     alpha = [[0] * N for _ in range(T)]
-    alpha_scaling = [0] * T
+    c = [0] * T
 
     # Initialize alpha[0]
     for i in range(N):
         alpha[0][i] = pi[i] * B[i][obs[0]]
-    alpha_scaling[0] = 1 / sum(alpha[0])
+        c[0] += alpha[0][i]
+
+    # Scale alpha[0]
+    c[0] = 1 / c[0]
     for i in range(N):
-        alpha[0][i] *= alpha_scaling[0]
+        alpha[0][i] *= c[0]
 
     # Recursive step
     for t in range(1, T):
-        for j in range(N):
-            alpha[t][j] = sum(alpha[t - 1][i] * A[i][j] for i in range(N)) * B[j][obs[t]]
-        alpha_scaling[t] = 1 / sum(alpha[t])
-        for j in range(N):
-            alpha[t][j] *= alpha_scaling[t]
+        c[t] = 0
+        for i in range(N):
+            alpha[t][i] = 0
+            for j in range(N):
+                alpha[t][i] += alpha[t - 1][j] * A[j][i]
+            alpha[t][i] *= B[i][obs[t]]
+            c[t] += alpha[t][i]
 
-    return alpha
+        # Scale alpha
+        c[t] = 1 / c[t]
+        for i in range(N):
+            alpha[t][i] *= c[t]
 
-def backward_pass(A, B, pi, obs):
+    return alpha, c
+
+def backward_pass(A, B, pi, obs, c):
     T = len(obs)
     N = len(A)
 
     beta = [[0] * N for _ in range(T)]
-    beta_scaling = [0] * T
 
     # Initialize beta[T-1]
     for i in range(N):
-        beta[T - 1][i] = 1
-    beta_scaling[T - 1] = 1 / sum(beta[T - 1])
-    for i in range(N):
-        beta[T - 1][i] *= beta_scaling[T - 1]
+        beta[T - 1][i] = c[T - 1]
 
     # Recursive step
     for t in range(T - 2, -1, -1):
         for i in range(N):
-            beta[t][i] = sum(A[i][j] * B[j][obs[t + 1]] * beta[t + 1][j] for j in range(N))
-        beta_scaling[t] = 1 / sum(beta[t])
-        for j in range(N):
-            beta[t][j] *= beta_scaling[t]
+            beta[t][i] = 0
+            for j in range(N):
+                beta[t][i] += A[i][j] * B[j][obs[t + 1]] * beta[t + 1][j]
+            beta[t][i] *= c[t]
 
     return beta
 
@@ -58,23 +65,18 @@ def compute_gammas(alpha, beta, A, B, pi, obs):
     di_gamma = [[[0] * N for _ in range(N)] for _ in range(T - 1)]
 
     for t in range(T - 1):
-        denom = sum(
-            alpha[t][i] * A[i][j] * B[j][obs[t + 1]] * beta[t + 1][j]
-            for i in range(N) for j in range(N)
-        )
-
         for i in range(N):
+            gamma[t][i] = 0
             for j in range(N):
-                contribution = alpha[t][i] * A[i][j] * B[j][obs[t + 1]] * beta[t + 1][j] / denom
-                gamma[t][i] += contribution
-                di_gamma[t][i][j] = contribution
+                di_gamma[t][i][j] = alpha[t][i] * A[i][j] * B[j][obs[t + 1]] * beta[t + 1][j]
+                gamma[t][i] += di_gamma[t][i][j]
 
     # Special case for gamma at T-1
-    denom = sum(alpha[T - 1][i] for i in range(N))
     for i in range(N):
-        gamma[T - 1][i] = alpha[T - 1][i] / denom
+        gamma[T - 1][i] = alpha[T - 1][i]
 
     return gamma, di_gamma
+
 
 def update_model(gamma, di_gamma, A, B, pi, obs):
     T = len(obs)
@@ -83,45 +85,62 @@ def update_model(gamma, di_gamma, A, B, pi, obs):
 
     # Re-estimate A
     for i in range(N):
+        denom = 0
+        for t in range(T - 1):
+            denom += gamma[t][i]
         for j in range(N):
-            numer = sum(di_gamma[t][i][j] for t in range(T - 1))
-            denom = sum(gamma[t][i] for t in range(T - 1))
-            A[i][j] = numer / denom if denom != 0 else 0
+            numer = 0
+            for t in range(T - 1):
+                numer += di_gamma[t][i][j]
+            A[i][j] = numer / denom
 
     # Re-estimate B
     for i in range(N):
-        for k in range(M):
-            numer = sum(gamma[t][i] for t in range(T) if obs[t] == k)
-            denom = sum(gamma[t][i] for t in range(T))
-            B[i][k] = numer / denom if denom != 0 else 0
+        denom = 0
+        for t in range(T):
+            denom += gamma[t][i]
+        for j in range(M):
+            numer = 0
+            for t in range(T):
+                if obs[t] == j:
+                    numer += gamma[t][i]
+            B[i][j] = numer / denom
 
     # Re-estimate pi
     for i in range(N):
         pi[i] = gamma[0][i]
 
+    return A, B, pi, obs
+
 
 def baum_welch_algorithm(A, B, pi, obs):
 
+    maxIters = 100
+    iters = 0
+    oldLogProb = -math.inf
+
     while True:
 
-        # Step 2: Compute all values
-        alpha = forward_pass(A, B, pi, obs)
-        beta = backward_pass(A, B, pi, obs)
+        alpha, c = forward_pass(A, B, pi, obs)
+        beta = backward_pass(A, B, pi, obs, c)
         gamma, di_gamma = compute_gammas(alpha, beta, A, B, pi, obs)
 
-        # Step 3: Re-estimate lambda
-        prev_A = [row[:] for row in A]
-        prev_B = [row[:] for row in B]
+        # Re-estimate lambda
         update_model(gamma, di_gamma, A, B, pi, obs)
 
-        # Step 4: Repeat until convergence
-        N = len(A)
-        M = len(B[0])
-        max_change_A = max(abs(A[i][j] - prev_A[i][j]) for i in range(N) for j in range(N))
-        max_change_B = max(abs(B[i][j] - prev_B[i][j]) for i in range(N) for j in range(M))
-        threshold = 1e-5
-        if max_change_A < threshold or max_change_B < threshold:
+        # Compute log-probability
+        T = len(obs)
+        logProb = 0
+        for i in range(T):
+            logProb += math.log(c[i])
+        logProb = -logProb
+
+        # Check convergence criterion
+        iters += 1
+        #print(logProb)
+        if iters >= maxIters or logProb <= oldLogProb:
             return A, B
+        oldLogProb = logProb
 
 
 def convert_to_matrix(data, num_rows, num_cols):
@@ -144,5 +163,11 @@ obs = list(map(int, obs_data[1:]))
 # Estimate model parameters
 A, B = baum_welch_algorithm(A, B, pi, obs)
 
-print("Estimated Transition Matrix (A):", A)
-print("Estimated Emission Matrix (B):", B)
+# Format the result
+A_out = f"{len(A)} {len(A[0])} "
+A_out += ' '.join([str(round(value, 6)) for row in A for value in row])
+print(A_out)
+
+B_out = f"{len(B)} {len(B[0])} "
+B_out += ' '.join([str(round(value, 6)) for row in B for value in row])
+print(B_out)
