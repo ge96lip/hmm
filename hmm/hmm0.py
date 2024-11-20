@@ -1,7 +1,5 @@
 import sys
-import numpy as np
 # Calculate emission probability distribution 
-
 
 def execute_hmm():
     # Read and parse input data
