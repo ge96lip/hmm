@@ -1,5 +1,6 @@
 import sys
 
+# most likely sequence of hidden states given the observations
 
 def viterbi_algorithm(A, B, pi, obs):
     T = len(obs)
@@ -10,10 +11,12 @@ def viterbi_algorithm(A, B, pi, obs):
     delta_id = [[0 for _ in range(N)] for _ in range(T)]
 
     # Initialize first time step
+    # compute  probability of having observed o1:t and being in a state Xt = xi given the most likely preceding state Xt−1 = xj for each t
     for i in range(N):
         delta[0][i] = pi[i] * B[i][obs[0]]
         delta_id[0][i] = 0
 
+    # update delta 
     # Fill delta matrices for all time steps
     for t in range(1, T):
         for i in range(N):
