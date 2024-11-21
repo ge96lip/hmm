@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
-import math
 from player_controller_hmm import PlayerControllerHMMAbstract
 from constants import *
 import random
+import math
 
 
 class HMM:
@@ -45,13 +45,12 @@ class HMM:
     def forward(self, obs):
     
         T = len(obs)
-        N = len(self.A)
 
-        alpha = [[0] * N for _ in range(T)]
+        alpha = [[0] * self.N for _ in range(T)]
         
         # alpha_1[i] = b_i*(o_1)*π_i
         # loop over all possible states 
-        for i in range(N):
+        for i in range(self.N):
             # initial state * observation probability given first observation
             alpha[0][i] = self.pi[i] * self.B[i][obs[0]]
             
@@ -88,21 +87,20 @@ class HMM:
 
         return beta
     
-    def forward_pass(self, A, B, pi, obs):
+    def forward_pass(self, obs):
         T = len(obs)
-        N = len(A)
 
-        alpha = [[0] * N for _ in range(T)]
+        alpha = [[0] * self.N for _ in range(T)]
         c = [0] * T
 
         # Initialize alpha[0]
-        for i in range(N):
-            alpha[0][i] = pi[i] * B[i][obs[0]]
+        for i in range(self.N):
+            alpha[0][i] = self.pi[i] * self.B[i][obs[0]]
             c[0] += alpha[0][i]
 
         # Scale alpha[0]
         c[0] = 1 / c[0]
-        for i in range(N):
+        for i in range(self.N):
             alpha[0][i] *= c[0]
 
         # Recursive step
@@ -110,9 +108,9 @@ class HMM:
             c[t] = 0
             for i in range(N):
                 alpha[t][i] = 0
-                for j in range(N):
-                    alpha[t][i] += alpha[t - 1][j] * A[j][i]
-                alpha[t][i] *= B[i][obs[t]]
+                for j in range(self.N):
+                    alpha[t][i] += alpha[t - 1][j] * self.A[j][i]
+                alpha[t][i] *= self.B[i][obs[t]]
                 c[t] += alpha[t][i]
 
             # Scale alpha
@@ -122,22 +120,21 @@ class HMM:
 
         return alpha, c
 
-    def backward_pass(self, A, B, pi, obs, c):
+    def backward_pass(self, obs, c):
         T = len(obs)
-        N = len(A)
-
-        beta = [[0] * N for _ in range(T)]
+        
+        beta = [[0] * self.N for _ in range(T)]
 
         # Initialize beta[T-1]
-        for i in range(N):
+        for i in range(self.N):
             beta[T - 1][i] = c[T - 1]
 
         # Recursive step
         for t in range(T - 2, -1, -1):
-            for i in range(N):
+            for i in range(self.N):
                 beta[t][i] = 0
-                for j in range(N):
-                    beta[t][i] += A[i][j] * B[j][obs[t + 1]] * beta[t + 1][j]
+                for j in range(self.N):
+                    beta[t][i] += self.A[i][j] * self.B[j][obs[t + 1]] * beta[t + 1][j]
                 beta[t][i] *= c[t]
 
         return beta
@@ -170,22 +167,21 @@ class HMM:
     
     def update_model(self, obs, gamma, di_gamma):
         T = len(obs)
-        N = len(self.A)
         M = len(self.B[0])
 
         # Re-estimate A
-        for i in range(N):
+        for i in range(self.N):
             denom = 0
             for t in range(T - 1):
                 denom += gamma[t][i]
-            for j in range(N):
+            for j in range(self.N):
                 numer = 0
                 for t in range(T - 1):
                     numer += di_gamma[t][i][j]
                 self.A[i][j] = numer / denom
 
         # Re-estimate B
-        for i in range(N):
+        for i in range(self.N):
             denom = 0
             for t in range(T):
                 denom += gamma[t][i]
@@ -196,7 +192,7 @@ class HMM:
                         numer += gamma[t][i]
                 self.B[i][j] = numer / denom
                 
-    def calculate_params(self, A, B, pi, obs): 
+    def calculate_params(self, obs): 
         T = len(obs)
         
         maxIters = 5
@@ -207,8 +203,8 @@ class HMM:
         while True:
             
             # alpha pass: 
-            alpha, c = self.forward_pass(A, B, pi, obs)
-            beta = self.backward_pass(A, B, pi, obs, c)
+            alpha, c = self.forward_pass(obs)
+            beta = self.backward_pass(obs, c)
             gamma, di_gamma = self.compute_gammas(obs, alpha, beta)
             
             self.update_model(obs, gamma, di_gamma)
@@ -223,7 +219,7 @@ class HMM:
             # Check convergence criterion
             iters += 1
             if iters >= maxIters or logProb <= oldLogProb:
-                return A, B, pi
+                return self.A, self.B, self.pi
             
             oldLogProb = logProb
         
@@ -231,16 +227,15 @@ class HMM:
 class PlayerControllerHMM(PlayerControllerHMMAbstract):
     
     def init_parameters(self):
+        # for each species have a HMM which has n observation for itself
+        # we only have one state that matters to us e.g. swimming -> the fish movement is modeled through B
         self.hmm_models = [HMM(1, 8) for _ in range(N_SPECIES)]
-        self.observations = {}  # Store sequences for each fish
-        self.revealed_fish = {}  # Track fish already revealed
-        self.guess_threshold = 0.19  # Threshold to make a confident guess
         # for each fish make a list of observations 
         self.fishes = [(i, []) for i in range(N_FISH)]
         
     def train(self, fish_id):
         model = self.hmm_models[fish_id]
-        A, B, pi = model.calculate_params(model.A, model.B, model.pi, self.obs)
+        A, B, pi = model.calculate_params(self.obs)
         self.hmm_models[fish_id].set_A(A)
         self.hmm_models[fish_id].set_B(B)
         self.hmm_models[fish_id].set_PI(pi)
@@ -257,12 +252,6 @@ class PlayerControllerHMM(PlayerControllerHMMAbstract):
         # store observation for each fish if one is made 
         for i in range(len(self.fishes)):
             self.fishes[i][1].append(observations[i])
-        
-        """# Add movement for each fish
-        for fish_id, movement in enumerate(observations):
-            if fish_id not in self.observations:
-                self.observations[fish_id] = []  # Initialize sequence for the fish
-            self.observations[fish_id].append(movement)"""
            
         # collect observations:  
         if step < 70:    
@@ -274,9 +263,7 @@ class PlayerControllerHMM(PlayerControllerHMMAbstract):
             max_probability = 0
             # Compute probabilities for each species
             for model, species in zip(self.hmm_models, range(N_SPECIES)):
-                alpha = model.forward(obs)
-                # print(alpha)
-                prob = alpha # sum(alpha[species])
+                prob = model.forward(obs)
                 if prob > max_probability:
                     max_probability = prob
                     fish_type = species
@@ -292,8 +279,6 @@ class PlayerControllerHMM(PlayerControllerHMMAbstract):
         :param fish_id: Index of the fish that was guessed
         :param true_type: The correct type of the fish
         """
-        # Map fish_id to true_type
-        self.revealed_fish[fish_id] = true_type
 
         if not correct: 
             self.train(true_type)
