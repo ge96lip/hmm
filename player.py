@@ -265,7 +265,7 @@ class PlayerControllerHMM(PlayerControllerHMMAbstract):
             self.observations[fish_id].append(movement)"""
            
         # collect observations:  
-        if step < 70:      # 110 = 180 timesteps - 70 guesses
+        if step < 70:    
             return None
         # make a guess
         else: 
