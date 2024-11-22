@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
+import sys
 from player_controller_hmm import PlayerControllerHMMAbstract
 from constants import *
 import random
 import math
 
+epsilon = sys.float_info.epsilon
 
 class HMM:
     def __init__(self, n_species, n_obs):
@@ -20,14 +22,10 @@ class HMM:
         self._normalize_matrix(self.A)
         self._normalize_matrix(self.B)
         self._normalize_vector(self.pi)
-        
-    def set_A(self, A):
+    
+    def set_params(self, A, B, pi): 
         self.A = A
-
-    def set_B(self, B):
         self.B = B
-
-    def set_PI(self, pi):
         self.pi = pi
         
     def _normalize_matrix(self, matrix):
@@ -57,35 +55,12 @@ class HMM:
         # at t we need to marginalize over the probability of having been in any other state at t-1 * matching observation probability
         for t in range(1, T):
             # loop over all possible states 
-            for j in range(N):
+            for j in range(self.N):
                 # b_i*(o_t)*sum[a_{j,i}*α_{t−1}(j)]
-                alpha[t][j] = sum(alpha[t - 1][i] * self.A[i][j] for i in range(N)) * self.B[j][obs[t]]
+                alpha[t][j] = sum(alpha[t - 1][i] * self.A[i][j] for i in range(self.N)) * self.B[j][obs[t]]
                 
         # compute the probability of having observed the final output sequence 
         return sum(alpha[T-1])
-
-    def backward(self, obs):
-        T = len(obs)
-
-        beta = [[0] * self.N for _ in range(T)]
-        beta_scaling = [0] * T
-
-        # Initialize beta[T-1]
-        for i in range(self.N):
-            beta[T - 1][i] = 1
-        beta_scaling[T - 1] = 1 / sum(beta[T - 1])
-        for i in range(self.N):
-            beta[T - 1][i] *= beta_scaling[T - 1]
-
-        # Recursive step
-        for t in range(T - 2, -1, -1):
-            for i in range(self.N):
-                beta[t][i] = sum(self.A[i][j] * self.B[j][obs[t + 1]] * beta[t + 1][j] for j in range(self.N))
-            beta_scaling[t] = 1 / sum(beta[t])
-            for j in range(self.N):
-                beta[t][j] *= beta_scaling[t]
-
-        return beta
     
     def forward_pass(self, obs):
         T = len(obs)
@@ -106,7 +81,7 @@ class HMM:
         # Recursive step
         for t in range(1, T):
             c[t] = 0
-            for i in range(N):
+            for i in range(self.N):
                 alpha[t][i] = 0
                 for j in range(self.N):
                     alpha[t][i] += alpha[t - 1][j] * self.A[j][i]
@@ -114,8 +89,8 @@ class HMM:
                 c[t] += alpha[t][i]
 
             # Scale alpha
-            c[t] = 1 / c[t]
-            for i in range(N):
+            c[t] = 1 / (c[t] + epsilon)
+            for i in range(self.N):
                 alpha[t][i] *= c[t]
 
         return alpha, c
@@ -146,23 +121,18 @@ class HMM:
         di_gamma = [[[0] * self.N for _ in range(self.N)] for _ in range(T - 1)]
 
         for t in range(T - 1):
-            denom = sum(
-                alpha[t][i] * self.A[i][j] * self.B[j][obs[t + 1]] * beta[t + 1][j]
-                for i in range(self.N) for j in range(self.N)
-            )
-
             for i in range(self.N):
+                gamma[t][i] = 0
                 for j in range(self.N):
-                    contribution = alpha[t][i] * self.A[i][j] * self.B[j][obs[t + 1]] * beta[t + 1][j] / denom
-                    gamma[t][i] += contribution
-                    di_gamma[t][i][j] = contribution
+                    di_gamma[t][i][j] = alpha[t][i] * self.A[i][j] * self.B[j][obs[t + 1]] * beta[t + 1][j]
+                    gamma[t][i] += di_gamma[t][i][j]
 
         # Special case for gamma at T-1
-        denom = sum(alpha[T - 1][i] for i in range(self.N))
         for i in range(self.N):
-            gamma[T - 1][i] = alpha[T - 1][i] / denom
+            gamma[T - 1][i] = alpha[T - 1][i]
 
         return gamma, di_gamma
+
 
     
     def update_model(self, obs, gamma, di_gamma):
@@ -178,7 +148,7 @@ class HMM:
                 numer = 0
                 for t in range(T - 1):
                     numer += di_gamma[t][i][j]
-                self.A[i][j] = numer / denom
+                self.A[i][j] = numer / (denom + epsilon)
 
         # Re-estimate B
         for i in range(self.N):
@@ -190,7 +160,7 @@ class HMM:
                 for t in range(T):
                     if obs[t] == j:
                         numer += gamma[t][i]
-                self.B[i][j] = numer / denom
+                self.B[i][j] = numer / (denom + epsilon)
                 
     def calculate_params(self, obs): 
         T = len(obs)
@@ -236,11 +206,8 @@ class PlayerControllerHMM(PlayerControllerHMMAbstract):
     def train(self, fish_id):
         model = self.hmm_models[fish_id]
         A, B, pi = model.calculate_params(self.obs)
-        self.hmm_models[fish_id].set_A(A)
-        self.hmm_models[fish_id].set_B(B)
-        self.hmm_models[fish_id].set_PI(pi)
+        self.hmm_models[fish_id].set_params(A, B, pi)
     
-
     def guess(self, step, observations):
         """
         This method is called every iteration with new observations -> giving new information. 
@@ -254,7 +221,7 @@ class PlayerControllerHMM(PlayerControllerHMMAbstract):
             self.fishes[i][1].append(observations[i])
            
         # collect observations:  
-        if step < 70:    
+        if step < 100:    
             return None
         # make a guess
         else: 
