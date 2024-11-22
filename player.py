@@ -74,7 +74,7 @@ class HMM:
             c[0] += alpha[0][i]
 
         # Scale alpha[0]
-        c[0] = 1 / c[0]
+        #c[0] = 1 / c[0]
         for i in range(self.N):
             alpha[0][i] *= c[0]
 
