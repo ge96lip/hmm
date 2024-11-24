@@ -1,3 +1,9 @@
+Information: 
+hmm4.py has the logic for the C-grade. 
+target.in has the targeted parameters for that exercise. 
+test2.in has the full observation sequence (10000) and the initial matrix parameters for A, B, pi
+
+
 Artificial Intelligence DD2424
 
 Fishing derby: Hidden Markov Models
@@ -25,7 +31,7 @@ You should start with a clean virtual environment, either using virtualenvwrappe
 For Macs with Apple Silicon, run:
 
 ```
-conda create --name "YourEnvName" python=3.10.12
+conda create --name "fish" python=3.10.12
 pip install -r requirements_mac.txt
 ```
 
