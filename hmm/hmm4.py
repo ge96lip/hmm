@@ -6,7 +6,6 @@ from itertools import permutations
 import matplotlib.pyplot as plt
 import numpy as np
 import time
-
 # Define target matrices for comparison
 target_A = [
     [0.7, 0.05, 0.25],
@@ -78,6 +77,7 @@ def initialize_hmm_params(strategy, obs, N=3, M=4):
         B = np.array(given_B)
         pi = np.array(given_pi)
     elif strategy == "frequency_based":
+
         # Frequency-based initialization (dummy example with uniform here; replace with real counts if available)
         state_mapped_obs = [o % N for o in obs]  # Map to states using modulo N
         emission_mapped_obs = [o % M for o in obs]  # Map to emissions using modulo M
@@ -100,13 +100,17 @@ def initialize_hmm_params(strategy, obs, N=3, M=4):
 
         # Normalize to convert counts to probabilities
         A = transition_counts / transition_counts.sum(axis=1, keepdims=True)
+        
         B = emission_counts / emission_counts.sum(axis=1, keepdims=True)
+        
         pi = initial_counts / initial_counts.sum()
-
+        
         # Handle potential NaN values due to zero divisions
         A = np.nan_to_num(A)
         B = np.nan_to_num(B)
         pi = np.nan_to_num(pi)
+    
+        
 
     elif strategy == "perturbed_target":
         # Perturbed initialization near the target matrices
@@ -131,6 +135,7 @@ def initialize_hmm_params(strategy, obs, N=3, M=4):
     A = normalize_matrix(A.tolist())
     B = normalize_matrix(B.tolist())
     pi = normalize_vector(pi.tolist())
+
     return A, B, pi
 
 def calculate_mse(matrix1, matrix2):
@@ -204,7 +209,7 @@ def map_observations(obs, M):
     """Map observations to the range [0, M-1]."""
     return [o % M for o in obs]
    
-def baum_welch_algorithm_with_convergence(A, B, pi, obs, max_iters=100, epsilon=1e-6):
+def baum_welch_algorithm_with_convergence(A_baum, B_baum, pi_baum, obs, max_iters=100, epsilon=1e-6):
     
     def forward_pass(A, B, pi, obs):
         T = len(obs)
@@ -309,10 +314,10 @@ def baum_welch_algorithm_with_convergence(A, B, pi, obs, max_iters=100, epsilon=
     old_log_prob = -math.inf
     log_likelihoods = []
     for iteration in range(max_iters):
-        alpha, c = forward_pass(A, B, pi, obs)
-        beta = backward_pass(A, B, pi, obs, c)
-        gamma, di_gamma = compute_gammas(alpha, beta, A, B, obs)
-        A, B, pi = update_model(gamma, di_gamma, A, B, pi, obs)
+        alpha, c = forward_pass(A_baum, B_baum, pi_baum, obs)
+        beta = backward_pass(A_baum, B_baum, pi_baum, obs, c)
+        gamma, di_gamma = compute_gammas(alpha, beta, A_baum, B_baum, obs)
+        A_baum, B_baum, pi_baum = update_model(gamma, di_gamma, A_baum, B_baum, pi_baum, obs)
 
         # Compute log-probability
         log_prob = -sum(math.log(max(c_t, 1e-10)) for c_t in c)  # Clamp c_t to avoid log(0)
@@ -321,15 +326,15 @@ def baum_welch_algorithm_with_convergence(A, B, pi, obs, max_iters=100, epsilon=
 
         # Check for convergence
         if abs(log_prob - old_log_prob) < epsilon:
-            A = round_matrix(A)
-            B = round_matrix(B)
-            pi = round_matrix(pi)
-            return iteration + 1, A, B, pi, True, log_likelihoods  # Return iteration count and final model
+            A_baum = round_matrix(A_baum)
+            B_baum = round_matrix(B_baum)
+            pi_baum = round_matrix(pi_baum)
+            return iteration + 1, A_baum, B_baum, pi_baum, True, log_likelihoods  # Return iteration count and final model
         old_log_prob = log_prob
-    A = round_matrix(A)
-    B = round_matrix(B)
-    pi = round_matrix(pi)
-    return max_iters, A, B, pi, False, log_likelihoods
+    A_baum = round_matrix(A_baum)
+    B_baum = round_matrix(B_baum)
+    pi_baum = round_matrix(pi_baum)
+    return max_iters, A_baum, B_baum, pi_baum, False, log_likelihoods
 
 def evaluate_model_log_likelihood(obs, A, B, pi):
     """Calculate log-likelihood of observations given the model."""
@@ -355,20 +360,11 @@ def normalize_vector(vector):
         vector[i] /= total
     return vector
 
-def question_7(): 
+def question_7(obs): 
     # Read input
-    A_data = sys.stdin.readline().split()
-    B_data = sys.stdin.readline().split()
-    pi_data = sys.stdin.readline().split()
-
-    # Convert into matrices
-    A = convert_to_matrix(A_data[2:], int(A_data[0]), int(A_data[1]))
-    A = normalize_matrix(A)
-    B = convert_to_matrix(B_data[2:], int(B_data[0]), int(B_data[1]))
-    B = normalize_matrix(B)
-    pi = list(map(float, pi_data[2:]))
-    pi = normalize_vector(pi)
-    return A, B, pi
+    A, B, pi = initialize_hmm_params("original", obs)
+    run_experiments(A, B, pi, obs, experiment_repetitions=1)
+    
     
 def question_8(obs): 
     
@@ -383,19 +379,22 @@ def question_8(obs):
     for i, strategy in enumerate(possible_initalization_methods): 
         print("Running strategy: ", strategy)
         A, B, pi = initialize_hmm_params(strategy, obs)
+        
+
         return_A, return_B, return_pi, total_mse = run_experiments(A, B, pi, obs)
         #print(total_mse, overall_mse)
         if total_mse < overall_mse: 
+            
             best_A = return_A
             best_B = return_B
             best_pi = return_pi
             best_strategy = strategy
             overall_mse = total_mse
             
-    return overall_mse, best_strategy
+    return overall_mse, best_strategy, best_A, best_B, best_pi
 
-def run_experiments(A, B, pi, obs, max_observations = 10000, initial_obs = 1000, experiment_repetitions = 1, step_size=100): 
-    
+def run_experiments(A, B, pi, obs, max_observations = 1000, initial_obs = 1000, experiment_repetitions = 1, step_size=100): 
+
     best_mse_A = float("inf")
     best_mse_B = float("inf")
     best_mse_pi = float("inf")
@@ -408,30 +407,33 @@ def run_experiments(A, B, pi, obs, max_observations = 10000, initial_obs = 1000,
     successful_runs = 0
     best_mse = np.inf
     for experiment in range(experiment_repetitions):
-        #print("Experiement: ", experiment)
+        print("Experiement: ", experiment)
         for num_obs in range(0, max_observations + 1, step_size):
             current_obs = (initial_obs + num_obs)
-            #print(f"Running with {current_obs} observation.")
+            print(f"Running with {current_obs} observation.")
             epsilon = max(1/math.sqrt(current_obs), 1e-6) # taking max yields better results than taking min 
             #print("Epsilon is: ", epsilon)
             obs_subset = obs[:(current_obs)]
             iterations, A_return, B_return, pi_return, converged, log = baum_welch_algorithm_with_convergence(A, B, pi, obs_subset, epsilon=epsilon)
             if converged:
-                #print(f"Algorithm converged with {current_obs} observations. For experiement run {experiment}")
-                #print(f"Converged in {iterations} iterations.")
+                print(f"Algorithm converged with {current_obs} observations. For experiement run {experiment}")
+                print(f"Converged in {iterations} iterations.")
                 # Compare matrices
+                
                 mse_A, mse_B, mse_pi, perm_A, perm_B, perm_pi = find_closest_match(A_return, B_return, pi_return, target_A, target_B, target_pi)
         
                 # mse_A, mse_B, mse_pi = compare_matrices(A_return, B_return, pi_return, target_A, target_B, target_pi)
                 total_mse = mse_A + mse_B + mse_pi
                 if total_mse < best_mse:
+                    print(f"MSE improved for {current_obs} observations.")
                     best_mse_A, best_mse_B, best_mse_pi = mse_A, mse_B, mse_pi
                     best_A, best_B, best_pi = perm_A, perm_B, perm_pi
                     best_mse = total_mse
                     best_iterations = iterations
                     best_observations = current_obs
-                #else: 
-                    #print(f"MSE is did not improve for any matrix for {current_obs} observations.")
+
+                else: 
+                    print(f"MSE did not improve for any matrix for {current_obs} observations.")
                     #break 
                     
                 total_iterations += iterations
@@ -443,8 +445,9 @@ def run_experiments(A, B, pi, obs, max_observations = 10000, initial_obs = 1000,
     # Calculate averages
     average_iterations = total_iterations / successful_runs if successful_runs > 0 else 0
     average_observations = total_observations / successful_runs if successful_runs > 0 else 0
-    print("number of total observation: ", len(obs))
-    print(f"Best iteration: {best_iterations}, Best observation number: {best_observations}")
+    print("Number of total observation: ", len(obs))
+    print(f"{best_iterations} iterations until convergence with run with highest MSE")
+    print(f"Best run had {best_observations} observations for training")
     print(f"Best MSE for A: {best_mse_A}")
     print(f"Best MSE for B: {best_mse_B}")
     print(f"Best MSE for pi: {best_mse_pi}")
@@ -456,7 +459,7 @@ def run_experiments(A, B, pi, obs, max_observations = 10000, initial_obs = 1000,
     return best_A, best_B, best_pi, best_mse
 
 
-def experiment_with_states_and_observations(obs, target_A, target_B, target_pi, max_states=5, max_emissions=6):
+def question_9(obs, target_A, target_B, target_pi, max_states=5, max_emissions=6):
     results = []
     for N in range(2, max_states + 1):  # Test varying number of states
         for M in range(2, max_emissions + 1):  # Test varying number of emissions
@@ -532,14 +535,14 @@ def experiment_with_states_and_observations(obs, target_A, target_B, target_pi, 
     print(best_result)
     return results
 
-def question10(obs): 
-    
-    print("number of obs: ", len(obs))
-    A_uniform, B_uniform, pi_uniform = initialize_hmm_params("uniform", obs, 3, 4)
-    A_random, B_random, pi_random = initialize_hmm_params("random", obs, 3, 4)
-    A_frequency, B_frequency, pi_frequency = initialize_hmm_params("frequency_based", obs, 3, 4)
-    A_perturbed, B_perturbed, pi_perturbed = initialize_hmm_params("perturbed_target", obs, 3, 4)
+def question10(obs, all_obs): 
     epsilon = max(1/math.sqrt(len(obs)), 1e-6) # taking max yields better results than taking min 
+
+    print("Number of observation used during training: ", len(obs))
+    A_uniform, B_uniform, pi_uniform = initialize_hmm_params("uniform", all_obs, 3, 4)
+    A_random, B_random, pi_random = initialize_hmm_params("random", all_obs, 3, 4)
+    A_frequency, B_frequency, pi_frequency = initialize_hmm_params("frequency_based", all_obs)
+    A_perturbed, B_perturbed, pi_perturbed = initialize_hmm_params("perturbed_target", all_obs, 3, 4)
 
     start_time = time.time()
     iterations_uniform, A_uni, B_uni, pi_uni, conf_uni, log_likelihoods_uniform = baum_welch_algorithm_with_convergence(A_uniform, B_uniform, pi_uniform, obs, epsilon=epsilon)
@@ -554,7 +557,7 @@ def question10(obs):
     frequency_time = time.time() - start_time
     
     start_time = time.time()
-    iterations_perturbed, A_frequ, B_frequ, pi_frequ, conf_frequ, log_likelihoods_frequency = baum_welch_algorithm_with_convergence(A_perturbed, B_perturbed, pi_perturbed, obs, epsilon=epsilon)
+    iterations_perturbed, A_pert, B_pert, pi_pert, conf_frequ, log_likelihoods_frequency = baum_welch_algorithm_with_convergence(A_perturbed, B_perturbed, pi_perturbed, obs, epsilon=epsilon)
     perturbed_time = time.time() - start_time
     
     print(f"Time (Uniform Initialization): {uniform_time} seconds")
@@ -569,10 +572,12 @@ def question10(obs):
     
     mse_uniform_A, mse_uniform_B, mse_uniform_pi, _, _, _ = find_closest_match(
                         A_uni, B_uni, pi_uni, target_A, target_B, target_pi) 
-    total_mse_uni = mse_uniform_A + mse_uniform_B + mse_uniform_pi
+    total_mse_uni = mse_uniform_A + mse_uniform_B + mse_uniform_pi 
     
-    mse_frequ_A, mse_frequ_B, mse_frequ_pi, _, _, _ = find_closest_match(
+    print("baum welch finds: \n A: ", A_frequ, "\n B: ",B_frequ, "\n pi: ", pi_frequ,)
+    mse_frequ_A, mse_frequ_B, mse_frequ_pi, freq_A, freq_B, freq_pi = find_closest_match(
                         A_frequ, B_frequ, pi_frequ, target_A, target_B, target_pi) 
+    print("after closest: ", freq_A, "B: \n", freq_B,"\n pi: ", freq_pi)
     total_mse_frequ = mse_frequ_A + mse_frequ_B + mse_frequ_pi
     
     mse_perturbed_A, mse_perturbed_B, mse_perturbed_pi, _, _, _ = find_closest_match(
@@ -582,8 +587,8 @@ def question10(obs):
     print(f"MSE (Random Initialization): {total_mse_random}")
     print(f"MSE (Frequency Initialization): {total_mse_frequ}")
     print(f"MSE (Perturbed Initialization): {total_mse_perturbed}")
+    print(f"MSE (Frequency Initialization): {total_mse_frequ}")
     
-    print(mse_frequ_A, mse_frequ_B, mse_frequ_pi)
     # Run multiple experiments
     results_uniform = [baum_welch_algorithm_with_convergence(A_uniform, B_uniform, pi_uniform, obs, epsilon=epsilon) for _ in range(10)]
     results_random = [baum_welch_algorithm_with_convergence(A_random, B_random, pi_random, obs, epsilon=epsilon) for _ in range(10)]
@@ -599,36 +604,35 @@ def question10(obs):
     print(f"Variance in A (Random): {variance_A_random}")
     print(f"Variance in A (Frequency): {variance_A_frequency}")
     print(f"Variance in A (Perturbed): {variance_A_perturbed}")
-    
-    """print(sum(log_likelihoods_random))
+    """
+    print(sum(log_likelihoods_random))
     print(sum(log_likelihoods_uniform))
-    print(sum(log_likelihoods_frequency))"""
-
+    print(sum(log_likelihoods_frequency))
+    """
     print(f"Iterations until convergence (Uniform): {iterations_uniform}")
     print(f"Iterations until convergence (Random): {iterations_random}")
     print(f"Iterations until convergence (Frequency): {iterations_frequency}")
     print(f"Iterations until convergence (Perturbed): {iterations_perturbed}")
-
+    
+    return freq_A, freq_B, freq_pi
 obs_data = sys.stdin.readline().split()
 obs = list(map(int, obs_data[1:]))
 
 random.seed(42)
 
-print("number of observation: ", len(obs))
+print("Number of observation: ", len(obs))
+# question 7: 
+question_7(obs)
 
-
-overall_mse, strategy = question_8(obs)
+# question 8: 
+overall_mse, strategy, A, B, pi = question_8(obs)
 print(f"{strategy} gives the lowest MSE over all strategies with: {overall_mse}")
-#A, B, pi = initialize_hmm_params("frequency_based", obs)
-# get best permutation 
-#_, _, _, A, B, pi = find_closest_match(A, B, pi, target_A, target_B, target_pi)
 
-# Experiment question 7 and 8: 
-#results_A, results_B, results_pi, total_mse = run_experiments(A, B, pi, obs, experiment_repetitions=1)
 #print("total mse: ", total_mse)
 obs_selected = obs[:(1000)]
 # Run the experiment
-# results = experiment_with_states_and_observations(obs_selected, target_A, target_B, target_pi, max_states=5, max_emissions=6)
-question10(obs_selected)
+results = question_9(obs_selected, target_A, target_B, target_pi, max_states=5, max_emissions=6)
+freq_A, freq_B, freq_pi = question10(obs_selected, obs)
+
 
 # print(f"A is: \n{A}, \n B is: \n {B} \npi is: \n {pi}")
