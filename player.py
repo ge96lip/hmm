@@ -127,7 +127,7 @@ class HMM:
 
     def update_model(self, obs, gamma, di_gamma):
         T = len(obs)
-        epsilon = 1e-6  # Small constant to prevent zeros
+        epsilon = 1e-6
 
         # Re-estimate A
         for i in range(self.N):
@@ -167,15 +167,12 @@ class HMM:
             self.update_model(obs, gamma, di_gamma)
 
             # Compute log-probability
-            T = len(obs)
             logProb = 0
-            for i in range(T):
+            for i in range(len(obs)):
                 logProb += math.log(c[i])
             logProb = -logProb
 
             # Check convergence criterion
-            iters += 1
-            # print(logProb)
             if logProb <= oldLogProb:
                 break
             oldLogProb = logProb
@@ -183,35 +180,35 @@ class HMM:
 
 class PlayerControllerHMM(PlayerControllerHMMAbstract):
     def init_parameters(self):
-        # for each species have a HMM which has n observation for itself
-        # we only have one state that matters to us e.g. swimming -> the fish movement is modeled through B
-        self.hmm_models = [HMM(1, 8) for _ in range(N_SPECIES)]
-
-        # for each fish make a list of observations
-        self.fishes = [(i, []) for i in range(N_FISH)]
-
-        self.curr_obs = None
+        self.hmm_models = [HMM(1, 8) for _ in range(N_SPECIES)] # HMM model for each species
+        self.fish_obs = [(i, []) for i in range(N_FISH)]  # Observation sequences for each fish
+        self.curr_obs = None    # Observation sequence of latest guessed fish
 
     def guess(self, step, observations):
 
         # Store movement for each fish
-        for i in range(len(self.fishes)):
-            self.fishes[i][1].append(observations[i])
+        for i in range(len(self.fish_obs)):
+            self.fish_obs[i][1].append(observations[i])
 
         # Start guessing after 100 steps
         if step < 100:
             return None
 
-        fish_id, obs = self.fishes.pop()
-        fish_type = 0
-        max_probability = 0
-        # Compute probabilities for each species
-        for model, species in zip(self.hmm_models, range(N_SPECIES)):
-            prob = model.evaluate(obs)
-            if prob > max_probability:
-                max_probability = prob
-                fish_type = species
+        # Select a fish
+        fish_id, obs = self.fish_obs.pop()
         self.curr_obs = obs
+
+        fish_type = 0
+        max_prob = 0
+
+        # Evaluate probability for each specie
+        for model, i in zip(self.hmm_models, range(N_SPECIES)):
+            prob = model.evaluate(obs)
+            if prob > max_prob:
+                fish_type = i
+                max_prob = prob
+
+        # Return fish type with highest probability
         return fish_id, fish_type
 
     def reveal(self, correct, fish_id, true_type):
