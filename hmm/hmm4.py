@@ -68,10 +68,12 @@ def initialize_hmm_params(strategy, obs, N=3, M=4):
     """Initialize HMM parameters based on the chosen strategy."""
     
     if strategy == "uniform":
-        # Uniform initialization
-        A = np.ones((N, N)) / N
-        B = np.ones((N, M)) / M
-        pi = np.ones(N) / N
+        # Uniform initialization with small noise to not be stuck in local minimum 
+        noise_scale = 0.01  # Scale of the noise
+        A = np.ones((N, N)) / N + noise_scale * np.random.rand(N, N)
+        B = np.ones((N, M)) / M + noise_scale * np.random.rand(N, M)
+        pi = np.ones(N) / N + noise_scale * np.random.rand(N)
+        
     elif strategy == "original": 
         A = np.array(given_A)
         B = np.array(given_B)
@@ -363,12 +365,12 @@ def normalize_vector(vector):
 def question_7(obs): 
     # Read input
     A, B, pi = initialize_hmm_params("original", obs)
-    run_experiments(A, B, pi, obs, experiment_repetitions=1)
+    run_experiments(A, B, pi, obs, max_observations=10000,  initial_obs=100, experiment_repetitions=1, step_size=100)
     
     
 def question_8(obs): 
     
-    possible_initalization_methods = ["uniform", "frequency_based", "random", "perturbed_target", "original"]
+    possible_initalization_methods = ["uniform"]#["uniform", "frequency_based", "random", "perturbed_target", "original"]
     # uniform = 0.34023055555555554 Best iteration: 3, Best observation number: 7100
     # frequency = 0.2534611111111111 Best iteration: 3, Best observation number: 1000
     # random = 0.356 Best iteration: 2, Best observation number: 11000
@@ -416,8 +418,8 @@ def run_experiments(A, B, pi, obs, max_observations = 1000, initial_obs = 1000, 
             obs_subset = obs[:(current_obs)]
             iterations, A_return, B_return, pi_return, converged, log = baum_welch_algorithm_with_convergence(A, B, pi, obs_subset, epsilon=epsilon)
             if converged:
-                print(f"Algorithm converged with {current_obs} observations. For experiement run {experiment}")
-                print(f"Converged in {iterations} iterations.")
+                #print(f"Algorithm converged with {current_obs} observations. For experiement run {experiment}")
+                #print(f"Converged in {iterations} iterations.")
                 # Compare matrices
                 
                 mse_A, mse_B, mse_pi, perm_A, perm_B, perm_pi = find_closest_match(A_return, B_return, pi_return, target_A, target_B, target_pi)
@@ -440,12 +442,12 @@ def run_experiments(A, B, pi, obs, max_observations = 1000, initial_obs = 1000, 
                 total_observations += num_obs
                 successful_runs += 1
                 #print(f"Converged in {iterations} iterations.")
-                
+            else: 
+                print(f"For {current_obs} the algorithm did not converge")   
             
     # Calculate averages
     average_iterations = total_iterations / successful_runs if successful_runs > 0 else 0
     average_observations = total_observations / successful_runs if successful_runs > 0 else 0
-    print("Number of total observation: ", len(obs))
     print(f"{best_iterations} iterations until convergence with run with highest MSE")
     print(f"Best run had {best_observations} observations for training")
     print(f"Best MSE for A: {best_mse_A}")
@@ -461,68 +463,69 @@ def run_experiments(A, B, pi, obs, max_observations = 1000, initial_obs = 1000, 
 
 def question_9(obs, target_A, target_B, target_pi, max_states=5, max_emissions=6):
     results = []
-    for N in range(2, max_states + 1):  # Test varying number of states
-        for M in range(2, max_emissions + 1):  # Test varying number of emissions
-            print(f"Testing with {N} states and {M} emissions...")
-            A, B, pi = initialize_hmm_params("frequency_based", obs, N, M)
-            # get best permutation 
-            #_, _, _, A, B, pi = find_closest_match(A, B, pi, target_A, target_B, target_pi)
+    N = 3
+    #for N in range(3, max_states + 1):  # Test varying number of states
+    for M in range(2, max_emissions + 1):  # Test varying number of emissions
+        print(f"Testing with {N} states and {M} emissions...")
+        A, B, pi = initialize_hmm_params("frequency_based", obs, N, M)
+        # get best permutation 
+        #_, _, _, A, B, pi = find_closest_match(A, B, pi, target_A, target_B, target_pi)
+        
+        epsilon = max(1/math.sqrt(len(obs)), 1e-6) # taking max yields better results than taking min 
+        # Train the HMM using Baum-Welch
+        mapped_obs = map_observations(obs, len(B[0])) 
+        iterations, A_return, B_return, pi_return, converged,_ = baum_welch_algorithm_with_convergence(
+            A, B, pi, mapped_obs, max_iters=100, epsilon=epsilon
+        )
+        
+        if converged:
+            print(f"Converged for {N} states and {M} emissions.")
             
-            epsilon = max(1/math.sqrt(len(obs)), 1e-6) # taking max yields better results than taking min 
-            # Train the HMM using Baum-Welch
-            mapped_obs = map_observations(obs, len(B[0])) 
-            iterations, A_return, B_return, pi_return, converged = baum_welch_algorithm_with_convergence(
-                A, B, pi, mapped_obs, max_iters=100, epsilon=epsilon
-            )
+            # Evaluate the model
+            total_mse = np.inf
+            mse_A, mse_B, mse_pi = np.inf, np.inf, np.inf
+            if (
+                len(target_A) == len(A_return) and  # Check number of rows in A
+                all(len(row) == len(target_A[0]) for row in A_return) and  # Check number of columns in A
+                len(target_B) == len(B_return) and  # Check number of rows in B
+                all(len(row) == len(target_B[0]) for row in B_return) and  # Check number of columns in B
+                len(target_pi) == len(pi_return)  # Check length of pi
+            ):
+                # Dimensions match, proceed with the comparison
+                mse_A, mse_B, mse_pi, perm_A, perm_B, perm_pi = find_closest_match(
+                    A_return, B_return, pi_return, target_A, target_B, target_pi
+                )                   
+                total_mse = mse_A + mse_B + mse_pi
+            else: 
+                """mse_A = calculate_mse_with_truncation(A_return, target_A)
+                mse_B = calculate_mse_with_truncation(B_return, target_B)
+                mse_pi = calculate_mse_with_truncation(pi_return, target_pi)"""
+                mse_A = calculate_mse_with_padding(A_return, target_A)
+                mse_B = calculate_mse_with_padding(B_return, target_B)
+                mse_pi = calculate_mse_with_padding(pi_return, target_pi)
+                
+                total_mse = mse_A + mse_B + mse_pi
+            # Calculate AIC and BIC
+            num_params = N * (N - 1) + N * M + (N - 1)  # Parameters: A, B, and pi
+            log_likelihood = -iterations  # Placeholder for log-likelihood
+            aic = 2 * num_params - 2 * log_likelihood
+            bic = num_params * math.log(len(obs)) - 2 * log_likelihood
             
-            if converged:
-                print(f"Converged for {N} states and {M} emissions.")
-                
-                # Evaluate the model
-                total_mse = np.inf
-                mse_A, mse_B, mse_pi = np.inf, np.inf, np.inf
-                if (
-                    len(target_A) == len(A_return) and  # Check number of rows in A
-                    all(len(row) == len(target_A[0]) for row in A_return) and  # Check number of columns in A
-                    len(target_B) == len(B_return) and  # Check number of rows in B
-                    all(len(row) == len(target_B[0]) for row in B_return) and  # Check number of columns in B
-                    len(target_pi) == len(pi_return)  # Check length of pi
-                ):
-                    # Dimensions match, proceed with the comparison
-                    mse_A, mse_B, mse_pi, perm_A, perm_B, perm_pi = find_closest_match(
-                        A_return, B_return, pi_return, target_A, target_B, target_pi
-                    )                   
-                    total_mse = mse_A + mse_B + mse_pi
-                else: 
-                    """mse_A = calculate_mse_with_truncation(A_return, target_A)
-                    mse_B = calculate_mse_with_truncation(B_return, target_B)
-                    mse_pi = calculate_mse_with_truncation(pi_return, target_pi)"""
-                    mse_A = calculate_mse_with_padding(A_return, target_A)
-                    mse_B = calculate_mse_with_padding(B_return, target_B)
-                    mse_pi = calculate_mse_with_padding(pi_return, target_pi)
-                    
-                    total_mse = mse_A + mse_B + mse_pi
-                # Calculate AIC and BIC
-                num_params = N * (N - 1) + N * M + (N - 1)  # Parameters: A, B, and pi
-                log_likelihood = -iterations  # Placeholder for log-likelihood
-                aic = 2 * num_params - 2 * log_likelihood
-                bic = num_params * math.log(len(obs)) - 2 * log_likelihood
-                
-                # Save results
-                results.append({
-                    "states": N,
-                    "emissions": M,
-                    "mse_A": mse_A,
-                    "mse_B": mse_B,
-                    "mse_pi": mse_pi,
-                    "total_mse": total_mse,
-                    "aic": aic,
-                    "bic": bic,
-                    "iterations": iterations,
-                })
-                print(f"Results: MSE(total): {total_mse}, MSE(A): {mse_A}, MSE(B): {mse_B}, MSE(pi): {mse_pi}, AIC: {aic}, BIC: {bic}")
-            else:
-                print(f"Did not converge for {N} states and {M} emissions.")
+            # Save results
+            results.append({
+                "states": N,
+                "emissions": M,
+                "mse_A": mse_A,
+                "mse_B": mse_B,
+                "mse_pi": mse_pi,
+                "total_mse": total_mse,
+                "aic": aic,
+                "bic": bic,
+                "iterations": iterations,
+            })
+            #print(f"Results: MSE(total): {total_mse}, MSE(A): {mse_A}, MSE(B): {mse_B}, MSE(pi): {mse_pi}, AIC: {aic}, BIC: {bic}")
+        else:
+            print(f"Did not converge for {N} states and {M} emissions.")
     # Find the best configuration
     best_result = min(results, key=lambda x: x["bic"])  # Choose the model with the lowest BIC
     print("Best Configuration BIC:")
@@ -574,10 +577,8 @@ def question10(obs, all_obs):
                         A_uni, B_uni, pi_uni, target_A, target_B, target_pi) 
     total_mse_uni = mse_uniform_A + mse_uniform_B + mse_uniform_pi 
     
-    print("baum welch finds: \n A: ", A_frequ, "\n B: ",B_frequ, "\n pi: ", pi_frequ,)
     mse_frequ_A, mse_frequ_B, mse_frequ_pi, freq_A, freq_B, freq_pi = find_closest_match(
                         A_frequ, B_frequ, pi_frequ, target_A, target_B, target_pi) 
-    print("after closest: ", freq_A, "B: \n", freq_B,"\n pi: ", freq_pi)
     total_mse_frequ = mse_frequ_A + mse_frequ_B + mse_frequ_pi
     
     mse_perturbed_A, mse_perturbed_B, mse_perturbed_pi, _, _, _ = find_closest_match(
@@ -622,16 +623,22 @@ random.seed(42)
 
 print("Number of observation: ", len(obs))
 # question 7: 
-question_7(obs)
+#question_7(obs)
 
 # question 8: 
-overall_mse, strategy, A, B, pi = question_8(obs)
-print(f"{strategy} gives the lowest MSE over all strategies with: {overall_mse}")
+#overall_mse, strategy, A, B, pi = question_8(obs)
+#print(f"{strategy} gives the lowest MSE over all strategies with: {overall_mse}")
 
 #print("total mse: ", total_mse)
 obs_selected = obs[:(1000)]
-# Run the experiment
-results = question_9(obs_selected, target_A, target_B, target_pi, max_states=5, max_emissions=6)
+"""num_obs = [100, 1000, 5000, 10000]
+for i, num_obs in enumerate(num_obs): 
+    print("Number of observation given to test: ", num_obs)
+    obs_selected = obs[:(num_obs)]
+    # Run the experiment
+    results = question_9(obs_selected, target_A, target_B, target_pi, max_states=5, max_emissions=6)
+    """
+
 freq_A, freq_B, freq_pi = question10(obs_selected, obs)
 
 
